@@ -49,9 +49,9 @@ if (existsSync(logDir)) {
       maxFiles: 30,
       json: false,
       zippedArchive: true,
-    })
+    }),
   );
-  
+
   logger.add(
     new winstonDaily({
       level: 'error',
@@ -62,7 +62,7 @@ if (existsSync(logDir)) {
       handleExceptions: true,
       json: false,
       zippedArchive: true,
-    })
+    }),
   );
 }
 

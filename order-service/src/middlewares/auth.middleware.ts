@@ -4,7 +4,6 @@ import { SECRET_KEY } from '@config';
 import { HttpException } from '@exceptions/HttpException';
 import { DataStoredInToken, RequestWithUser } from '@interfaces/auth.interface';
 import { UserModel } from '@/models/user.model';
-import { Role } from '@/utils/types/user';
 
 const getAuthorization = req => {
   const coockie = req.cookies['Authorization'];
