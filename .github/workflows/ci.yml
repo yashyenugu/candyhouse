@@ -1,0 +1,87 @@
+name: CI
+
+# The GATE. Runs on every pull request into main.
+# It checks only the service(s) that changed, cheapest check first.
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read            # least privilege: the gate only reads code
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true  # a new push to the PR cancels the old run
+
+jobs:
+  # Work out which services changed so we don't test all four every time.
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      services: ${{ steps.filter.outputs.changes }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            user-service: 'user-service/**'
+            product-service: 'product-service/**'
+            order-service: 'order-service/**'
+            store-ui: 'store-ui/**'
+
+  # Type-check, lint and test each changed service in parallel.
+  verify:
+    needs: changes
+    if: ${{ needs.changes.outputs.services != '[]' && needs.changes.outputs.services != '' }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service: ${{ fromJSON(needs.changes.outputs.services) }}
+    defaults:
+      run:
+        working-directory: ${{ matrix.service }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: yarn
+          cache-dependency-path: ${{ matrix.service }}/yarn.lock
+      - name: Install
+        run: yarn install --frozen-lockfile
+      - name: Type check
+        run: yarn tsc --noEmit
+      - name: Lint
+        run: |
+          if jq -e '.scripts.lint' package.json >/dev/null 2>&1; then
+            yarn lint
+          else
+            echo "No lint script in $(basename "$PWD"); skipping."
+          fi
+      - name: Test
+        run: |
+          if jq -e '.scripts.test' package.json >/dev/null 2>&1; then
+            yarn test
+          else
+            echo "No test script in $(basename "$PWD"); skipping."
+          fi
+
+  # Single required status check. Mark THIS job as required in branch protection.
+  # It passes when verify succeeded or was skipped (no service changed),
+  # and fails when verify failed. This avoids a "waiting for required check"
+  # deadlock on PRs that touch no service.
+  gate:
+    if: always()
+    needs: [changes, verify]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require verify to pass
+        run: |
+          echo "verify result: ${{ needs.verify.result }}"
+          if [ "${{ needs.verify.result }}" = "failure" ] || [ "${{ needs.verify.result }}" = "cancelled" ]; then
+            echo "Gate failed: a changed service did not pass."
+            exit 1
+          fi
+          echo "Gate passed."

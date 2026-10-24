@@ -1,2 +1,16 @@
 secrets.yaml
 .cursorignore
+
+# Environment files — never commit real keys.
+# .env.example files are kept (they are placeholders).
+.env
+.env.*
+**/.env
+**/.env.*
+!.env.example
+!**/.env.example
+
+# Node
+node_modules/
+dist/
+.next/
