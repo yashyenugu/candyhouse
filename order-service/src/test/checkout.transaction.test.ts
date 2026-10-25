@@ -47,9 +47,9 @@ const seedCandy = (appId: string, quantity: number) =>
     photo: { url: 'u', publicId: 'p' },
   });
 
-const checkoutReq = (candy: string, itemsInCart: number) => ({
+const checkoutReq = (candy: string, itemsInCart: number, paymentIntentId = 'pi_1') => ({
   user: { _id: userId },
-  body: { paymentIntentId: 'pi_1', address: 'addr', items: [item(candy, itemsInCart)] },
+  body: { paymentIntentId, address: 'addr', items: [item(candy, itemsInCart)] },
 });
 
 beforeAll(async () => {
@@ -74,7 +74,7 @@ describe('transactions', () => {
     const session = await mongoose.startSession();
     await expect(
       session.withTransaction(async () => {
-        await OrderModel.create([{ user: userId, items: [], address: 'x', price: 1, coinsRedeemed: 0 }], { session });
+        await OrderModel.create([{ user: userId, items: [], address: 'x', price: 1, coinsRedeemed: 0, paymentId: 'pi_x' }], { session });
         await OutboxModel.create([{ topic: 'quantity', messages: [] }], { session });
         throw new Error('boom');
       }),
@@ -132,9 +132,48 @@ describe('confirmAndCreate', () => {
   });
 });
 
+describe('idempotent checkout', () => {
+  it('returns the same order when confirm is retried sequentially', async () => {
+    await seedCandy('c1', 10);
+    const first = await run(controller.confirmAndCreate, checkoutReq('c1', 1));
+    const second = await run(controller.confirmAndCreate, checkoutReq('c1', 1));
+
+    expect(second.next).not.toHaveBeenCalled();
+    expect(second.res.send.mock.calls[0][0]._id).toEqual(first.res.send.mock.calls[0][0]._id);
+    expect(await OrderModel.countDocuments({ paymentId: 'pi_1' })).toBe(1);
+    expect(await OutboxModel.countDocuments()).toBe(1);
+    expect(mockSend).toHaveBeenCalledTimes(1);
+  });
+
+  it('creates one order for concurrent confirms of the same payment', async () => {
+    await seedCandy('c1', 10);
+    const results = await Promise.all([1, 2, 3].map(() => run(controller.confirmAndCreate, checkoutReq('c1', 1))));
+
+    const ids = results.map(r => String(r.res.send.mock.calls[0][0]._id));
+    expect(results.every(r => r.next.mock.calls.length === 0)).toBe(true);
+    expect(new Set(ids).size).toBe(1);
+    expect(await OrderModel.countDocuments({ paymentId: 'pi_1' })).toBe(1);
+    expect(await OutboxModel.countDocuments()).toBe(1);
+  });
+
+  it('keeps distinct payments as distinct orders', async () => {
+    await seedCandy('c1', 10);
+    await run(controller.confirmAndCreate, checkoutReq('c1', 1, 'pi_a'));
+    await run(controller.confirmAndCreate, checkoutReq('c1', 1, 'pi_b'));
+
+    expect(await OrderModel.countDocuments()).toBe(2);
+    expect(await OutboxModel.countDocuments()).toBe(2);
+  });
+
+  it('has a unique index on paymentId', async () => {
+    const indexes = await OrderModel.collection.indexes();
+    expect(indexes.some(i => i.key.paymentId === 1 && i.unique)).toBe(true);
+  });
+});
+
 describe('cancel', () => {
   it('cancels and records a positive restock delta', async () => {
-    const order = await OrderModel.create({ user: userId, items: [item('c1', 2)], address: 'a', price: 4, coinsRedeemed: 0 });
+    const order = await OrderModel.create({ user: userId, items: [item('c1', 2)], address: 'a', price: 4, coinsRedeemed: 0, paymentId: 'pi_c' });
     const { next } = await run(controller.cancel, { params: { id: order._id.toString() } });
 
     expect(next).not.toHaveBeenCalled();
@@ -151,6 +190,7 @@ describe('cancel', () => {
       address: 'a',
       price: 4,
       coinsRedeemed: 0,
+      paymentId: 'pi_c',
       status: Status.Cancelled,
     });
     const { next } = await run(controller.cancel, { params: { id: order._id.toString() } });
