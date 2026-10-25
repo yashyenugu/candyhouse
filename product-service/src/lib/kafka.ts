@@ -2,7 +2,7 @@ import { Kafka } from 'kafkajs';
 
 const kafka = new Kafka({
   clientId: 'product-service',
-  brokers: ['candyhouse-kafka:9092'],
+  brokers: [process.env.KAFKA_URL || 'candyhouse-kafka:9092'],
 });
 
 export const consumer = kafka.consumer({

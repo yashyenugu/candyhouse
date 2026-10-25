@@ -4,7 +4,7 @@ dotenv.config();
 
 const kafka = new Kafka({
   clientId: "user-service",
-  brokers: ['candyhouse-kafka:9092'],
+  brokers: [process.env.KAFKA_URL || 'candyhouse-kafka:9092'],
 });
 
 export const producer = kafka.producer({

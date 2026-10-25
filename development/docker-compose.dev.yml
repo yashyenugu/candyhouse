@@ -12,7 +12,6 @@ services:
       - "27017:27017"
     volumes:
       - mongodb_data:/data/db
-      - ./init-mongo.js:/docker-entrypoint-initdb.d/init-mongo.js:ro
     environment:
       - MONGO_INITDB_DATABASE=candyhouse-users
     networks:
@@ -74,6 +73,3 @@ volumes:
 networks:
   candyhouse-dev:
     driver: bridge
-
-# Health check script (optional)
-# Run: docker-compose -f kafka/docker-compose.dev.yml exec kafka kafka-topics.sh --bootstrap-server localhost:9092 --create --topic user --partitions 3 --replication-factor 1
