@@ -2,12 +2,10 @@ import { HttpException } from '@/exceptions/HttpException';
 import { RequestWithUser } from '@/interfaces/auth.interface';
 import { producer } from '@/lib/kafka';
 import CandyModel from '@/models/candy.model';
-import CouponModel from '@/models/coupon.model';
 import OrderModel from '@/models/order.model';
-import { UserModel } from '@/models/user.model';
 import { orderByIdSchema, orderInputSchema, orderUpdateSchema, orderConfirmSchema, paginatedOrderFetchSchema } from '@/utils/schemas/order';
 import { Status } from '@/utils/types/order';
-import { NextFunction, Request, Response } from 'express';
+import { NextFunction, Response } from 'express';
 import mongoose from 'mongoose';
 import { z } from 'zod';
 import Stripe from 'stripe';
@@ -44,7 +42,6 @@ export class OrderController {
   };
 
   public create = async (req: RequestWithUser, res: Response, next: NextFunction): Promise<void> => {
-    const session = await mongoose.startSession();
     try {
       const { items, address }: z.infer<typeof orderInputSchema> = req.body;
       // Calculate total
@@ -53,7 +50,7 @@ export class OrderController {
         total += x.price * x.itemsInCart;
       }
       // Create Stripe PaymentIntent
-      const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, { apiVersion: '2025-07-30.basil' });
+      const stripe = new Stripe(process.env.STRIPE_SECRET_KEY as string, { apiVersion: '2025-07-30.basil' });
       const paymentIntent = await stripe.paymentIntents.create({
         amount: Math.round(total * 100), // Stripe expects amount in cents
         currency: 'usd',
@@ -133,14 +130,9 @@ export class OrderController {
         throw new HttpException(400, 'Order is already cancelled');
       }
 
-      const updated = await OrderModel.findByIdAndUpdate(id, {
+      await OrderModel.findByIdAndUpdate(id, {
         status: Status.Cancelled,
       });
-
-      const candyQuantityUpdates = order.items.map(orderItem => ({
-        key: orderItem.candy,
-        value: JSON.stringify({ quantity: orderItem.itemsInCart }),
-      }));
 
       await session.commitTransaction();
       session.endSession();
@@ -184,7 +176,7 @@ export class OrderController {
         candy: item.candy || item.appId, // Use candy if present, otherwise use appId
       }));
       // Verify payment status with Stripe
-      const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, { apiVersion: '2025-07-30.basil' });
+      const stripe = new Stripe(process.env.STRIPE_SECRET_KEY as string, { apiVersion: '2025-07-30.basil' });
       const paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId);
       if (paymentIntent.status !== 'succeeded') {
         res.status(400).json({ error: 'Payment not confirmed' });
@@ -199,7 +191,7 @@ export class OrderController {
         },
       });
       for (const candyDocument of candyDocuments) {
-        const numItems = transformedItems.find(item => item.candy == candyDocument.appId)!.itemsInCart;
+        const numItems = transformedItems.find(item => item.candy == candyDocument.appId)?.itemsInCart ?? 0;
         if (candyDocument.quantity - numItems < 0) {
           throw new HttpException(400, 'Insufficient stock for candy ' + candyDocument.name);
         }
