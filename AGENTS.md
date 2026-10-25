@@ -38,6 +38,8 @@ Env files, by service (note they differ):
 - `product-service` and `order-service` load `.env.development.local`.
 - `store-ui` uses `.env.local` (Next.js).
 
+`order-service` uses multi-document transactions, so `MONGO_URI` must point at a replica set (the dev compose runs a single-node `rs0`; use `?replicaSet=rs0`). A standalone Mongo fails with "Transaction numbers are only allowed on a replica set member".
+
 Known rough edges: the Kafka broker address is hardcoded to `candyhouse-kafka:9092` in each backend service's `lib/kafka.ts`, so native local runs need that mapped to localhost (or the string changed). `order-service` and the others connect to Kafka at boot in `server.ts`.
 
 ## Testing
