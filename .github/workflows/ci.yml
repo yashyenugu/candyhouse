@@ -1,24 +1,24 @@
 name: CI
 
 # The GATE. Runs on every pull request into main.
-# It checks only the service(s) that changed, cheapest check first.
+# Checks only the service(s) that changed (cheapest check first), and
+# builds each changed service's Docker image so a broken Dockerfile fails the PR.
 on:
   pull_request:
     branches: [main]
 
 permissions:
-  contents: read            # least privilege: the gate only reads code
+  contents: read
 
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true  # a new push to the PR cancels the old run
+  cancel-in-progress: true
 
 jobs:
-  # Work out which services changed so we don't test all four every time.
   changes:
     runs-on: ubuntu-latest
     outputs:
-      services: ${{ steps.filter.outputs.changes }}
+      services: ${{ steps.resolve.outputs.services }}
     steps:
       - uses: actions/checkout@v4
       - uses: dorny/paths-filter@v3
@@ -29,8 +29,16 @@ jobs:
             product-service: 'product-service/**'
             order-service: 'order-service/**'
             store-ui: 'store-ui/**'
+            cicd: '.github/workflows/ci.yml'
+      - id: resolve
+        # A change to the CI file re-checks all four services; otherwise only the ones that changed.
+        run: |
+          if [ "${{ steps.filter.outputs.cicd }}" = "true" ]; then
+            echo 'services=["user-service","product-service","order-service","store-ui"]' >> "$GITHUB_OUTPUT"
+          else
+            echo 'services=${{ steps.filter.outputs.changes }}' >> "$GITHUB_OUTPUT"
+          fi
 
-  # Type-check, lint and test each changed service in parallel.
   verify:
     needs: changes
     if: ${{ needs.changes.outputs.services != '[]' && needs.changes.outputs.services != '' }}
@@ -68,20 +76,40 @@ jobs:
             echo "No test script in $(basename "$PWD"); skipping."
           fi
 
-  # Single required status check. Mark THIS job as required in branch protection.
-  # It passes when verify succeeded or was skipped (no service changed),
-  # and fails when verify failed. This avoids a "waiting for required check"
-  # deadlock on PRs that touch no service.
+  # Build each changed service's Docker image (no push). This is the
+  # "image builds on GitHub Actions" check: a broken Dockerfile fails the PR.
+  build-image:
+    needs: changes
+    if: ${{ needs.changes.outputs.services != '[]' && needs.changes.outputs.services != '' }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service: ${{ fromJSON(needs.changes.outputs.services) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build image (no push)
+        uses: docker/build-push-action@v5
+        with:
+          context: ./${{ matrix.service }}
+          push: false
+
+  # Single required status check. Mark THIS job required in branch protection.
+  # Passes when verify and build-image succeeded or were skipped; fails if either failed.
   gate:
     if: always()
-    needs: [changes, verify]
+    needs: [changes, verify, build-image]
     runs-on: ubuntu-latest
     steps:
-      - name: Require verify to pass
+      - name: Require checks to pass
         run: |
-          echo "verify result: ${{ needs.verify.result }}"
-          if [ "${{ needs.verify.result }}" = "failure" ] || [ "${{ needs.verify.result }}" = "cancelled" ]; then
-            echo "Gate failed: a changed service did not pass."
-            exit 1
-          fi
+          echo "verify:      ${{ needs.verify.result }}"
+          echo "build-image: ${{ needs.build-image.result }}"
+          for r in "${{ needs.verify.result }}" "${{ needs.build-image.result }}"; do
+            if [ "$r" = "failure" ] || [ "$r" = "cancelled" ]; then
+              echo "Gate failed: a changed service did not pass."
+              exit 1
+            fi
+          done
           echo "Gate passed."

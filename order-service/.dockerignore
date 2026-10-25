@@ -16,3 +16,7 @@ jest.config.js
 # docker
 Dockerfile
 docker-compose.yml
+
+# secrets — never bake env files into an image
+.env
+.env.*

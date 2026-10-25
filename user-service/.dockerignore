@@ -1,0 +1,24 @@
+# compiled output
+.vscode
+/node_modules
+/dist
+
+# code formatter
+.eslintrc
+.eslintignore
+.editorconfig
+.huskyrc
+.lintstagedrc.json
+.prettierrc
+
+# test
+jest.config.js
+
+# secrets — never bake env files into an image
+.env
+.env.*
+
+# docker
+Dockerfile
+Dockerfile.dev
+docker-compose.yml
