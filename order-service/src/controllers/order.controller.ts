@@ -3,12 +3,26 @@ import { RequestWithUser } from '@/interfaces/auth.interface';
 import { producer } from '@/lib/kafka';
 import CandyModel from '@/models/candy.model';
 import OrderModel from '@/models/order.model';
+import OutboxModel from '@/models/outbox.model';
 import { orderByIdSchema, orderInputSchema, orderUpdateSchema, orderConfirmSchema, paginatedOrderFetchSchema } from '@/utils/schemas/order';
 import { Status } from '@/utils/types/order';
 import { NextFunction, Response } from 'express';
 import mongoose from 'mongoose';
 import { z } from 'zod';
 import Stripe from 'stripe';
+
+// Temporary best-effort relay: publish right after commit and mark the row sent.
+// If Kafka is down the row stays pending, so a proper relay (transactional outbox)
+// can pick it up later; until then this is the one remaining weak point.
+const publishOutbox = async (outboxId: unknown, messages: { key: string; value: string }[]): Promise<void> => {
+  try {
+    await producer.connect();
+    await producer.send({ topic: 'quantity', messages });
+    await OutboxModel.updateOne({ _id: outboxId }, { status: 'sent' });
+  } catch (error) {
+    console.error('Failed to publish outbox event; left pending', error);
+  }
+};
 
 export class OrderController {
   public allForAdmin = async (req: RequestWithUser, res: Response, next: NextFunction): Promise<void> => {
@@ -117,37 +131,39 @@ export class OrderController {
   public cancel = async (req: RequestWithUser, res: Response, next: NextFunction): Promise<void> => {
     const session = await mongoose.startSession();
     try {
-      session.startTransaction();
       const { id }: z.infer<typeof orderByIdSchema> = req.params;
+      let outboxId: unknown;
+      let restock: { key: string; value: string }[] = [];
 
-      const order = await OrderModel.findOne({ _id: id });
+      await session.withTransaction(async () => {
+        const order = await OrderModel.findOne({ _id: id }).session(session);
 
-      if (!order) {
-        throw new HttpException(404, 'order not found');
-      }
+        if (!order) {
+          throw new HttpException(404, 'order not found');
+        }
 
-      if (order.status === Status.Cancelled) {
-        throw new HttpException(400, 'Order is already cancelled');
-      }
+        if (order.status === Status.Cancelled) {
+          throw new HttpException(400, 'Order is already cancelled');
+        }
 
-      await OrderModel.findByIdAndUpdate(id, {
-        status: Status.Cancelled,
+        await OrderModel.findByIdAndUpdate(id, { status: Status.Cancelled }, { session });
+
+        // Restock is a positive delta, recorded in the same transaction as the cancellation.
+        restock = order.items.map(orderItem => ({
+          key: orderItem.candy,
+          value: JSON.stringify({ quantity: orderItem.itemsInCart }),
+        }));
+        const [outbox] = await OutboxModel.create([{ topic: 'quantity', messages: restock, status: 'pending' }], { session });
+        outboxId = outbox._id;
       });
 
-      await session.commitTransaction();
-      session.endSession();
+      await publishOutbox(outboxId, restock);
 
-      // await producer.connect();
-      // await producer.send({
-      //   topic: 'quantity',
-      //   messages: candyQuantityUpdates,
-      // });
-
-      res.send(order);
+      res.send(await OrderModel.findById(id));
     } catch (error) {
-      await session.abortTransaction();
-      session.endSession();
       next(error);
+    } finally {
+      await session.endSession();
     }
   };
 
@@ -168,61 +184,83 @@ export class OrderController {
     const session = await mongoose.startSession();
     try {
       const { paymentIntentId, items, address }: z.infer<typeof orderConfirmSchema> = req.body;
-      console.log('called confirmAndCreate');
 
       // Transform items: ensure appId is mapped to candy
       const transformedItems = items.map(item => ({
         ...item,
         candy: item.candy || item.appId, // Use candy if present, otherwise use appId
       }));
-      // Verify payment status with Stripe
+      // Verify payment status with Stripe. External calls stay outside the transaction.
       const stripe = new Stripe(process.env.STRIPE_SECRET_KEY as string, { apiVersion: '2025-07-30.basil' });
       const paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId);
       if (paymentIntent.status !== 'succeeded') {
         res.status(400).json({ error: 'Payment not confirmed' });
         return;
       }
-      // Inventory and order creation logic (copied from previous create logic)
-      session.startTransaction();
-      const candyIds = [...new Set(transformedItems.map(item => item.candy))];
-      const candyDocuments = await CandyModel.find({
-        appId: {
-          $in: candyIds,
-        },
-      });
-      for (const candyDocument of candyDocuments) {
-        const numItems = transformedItems.find(item => item.candy == candyDocument.appId)?.itemsInCart ?? 0;
-        if (candyDocument.quantity - numItems < 0) {
-          throw new HttpException(400, 'Insufficient stock for candy ' + candyDocument.name);
-        }
-      }
+
       const candyQuantityUpdates = transformedItems.map(orderItem => ({
         key: orderItem.candy,
         value: JSON.stringify({ quantity: -orderItem.itemsInCart }),
       }));
-      // let total = 0;
-      // for (const x of items) {
-      //   total += x.price * x.itemsInCart;
-      // }
-      const order = await OrderModel.create({
-        user: req.user._id,
-        items: transformedItems,
-        price: paymentIntent.amount / 100, // Stripe amount is in cents (dollars now)
-        address,
-        coinsRedeemed: 0,
+
+      let order;
+      let outboxId: unknown;
+      let replayed = false;
+      await session.withTransaction(async () => {
+        // Idempotency: a payment that already produced an order returns that order.
+        const existing = await OrderModel.findOne({ paymentId: paymentIntentId }).session(session);
+        if (existing) {
+          order = existing;
+          replayed = true;
+          return;
+        }
+
+        const candyIds = [...new Set(transformedItems.map(item => item.candy))];
+        const candyDocuments = await CandyModel.find({ appId: { $in: candyIds } }).session(session);
+        for (const candyDocument of candyDocuments) {
+          const numItems = transformedItems.find(item => item.candy == candyDocument.appId)?.itemsInCart ?? 0;
+          if (candyDocument.quantity - numItems < 0) {
+            throw new HttpException(400, 'Insufficient stock for candy ' + candyDocument.name);
+          }
+        }
+
+        // With a session, create() needs an array or the session is ignored.
+        const [created] = await OrderModel.create(
+          [
+            {
+              user: req.user._id,
+              items: transformedItems,
+              price: paymentIntent.amount / 100, // Stripe amount is in cents (dollars now)
+              address,
+              coinsRedeemed: 0,
+              paymentId: paymentIntentId,
+            },
+          ],
+          { session },
+        );
+        order = created;
+
+        const [outbox] = await OutboxModel.create([{ topic: 'quantity', messages: candyQuantityUpdates, status: 'pending' }], { session });
+        outboxId = outbox._id;
       });
-      await session.commitTransaction();
-      session.endSession();
-      await producer.connect();
-      await producer.send({
-        topic: 'quantity',
-        messages: candyQuantityUpdates,
-      });
+
+      if (!replayed) {
+        await publishOutbox(outboxId, candyQuantityUpdates);
+      }
+
       res.send(order);
     } catch (error) {
-      await session.abortTransaction();
-      session.endSession();
+      // 11000: a concurrent request for the same payment won the race; replay its order.
+      if ((error as { code?: number })?.code === 11000) {
+        const existing = await OrderModel.findOne({ paymentId: req.body.paymentIntentId });
+        if (existing) {
+          res.send(existing);
+          return;
+        }
+      }
       next(error);
+    } finally {
+      await session.endSession();
     }
   };
 }
