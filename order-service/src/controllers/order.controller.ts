@@ -205,7 +205,16 @@ export class OrderController {
 
       let order;
       let outboxId: unknown;
+      let replayed = false;
       await session.withTransaction(async () => {
+        // Idempotency: a payment that already produced an order returns that order.
+        const existing = await OrderModel.findOne({ paymentId: paymentIntentId }).session(session);
+        if (existing) {
+          order = existing;
+          replayed = true;
+          return;
+        }
+
         const candyIds = [...new Set(transformedItems.map(item => item.candy))];
         const candyDocuments = await CandyModel.find({ appId: { $in: candyIds } }).session(session);
         for (const candyDocument of candyDocuments) {
@@ -224,6 +233,7 @@ export class OrderController {
               price: paymentIntent.amount / 100, // Stripe amount is in cents (dollars now)
               address,
               coinsRedeemed: 0,
+              paymentId: paymentIntentId,
             },
           ],
           { session },
@@ -234,10 +244,20 @@ export class OrderController {
         outboxId = outbox._id;
       });
 
-      await publishOutbox(outboxId, candyQuantityUpdates);
+      if (!replayed) {
+        await publishOutbox(outboxId, candyQuantityUpdates);
+      }
 
       res.send(order);
     } catch (error) {
+      // 11000: a concurrent request for the same payment won the race; replay its order.
+      if ((error as { code?: number })?.code === 11000) {
+        const existing = await OrderModel.findOne({ paymentId: req.body.paymentIntentId });
+        if (existing) {
+          res.send(existing);
+          return;
+        }
+      }
       next(error);
     } finally {
       await session.endSession();

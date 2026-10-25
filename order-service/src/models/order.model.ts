@@ -1,5 +1,5 @@
 import { User } from './user.model';
-import { getModelForClass, prop, modelOptions, pre, ReturnModelType } from '@typegoose/typegoose';
+import { getModelForClass, prop, modelOptions, pre, index, ReturnModelType } from '@typegoose/typegoose';
 import type { Ref } from '@typegoose/typegoose';
 import mongoose from 'mongoose';
 import { Status } from '@/utils/types/order';
@@ -58,6 +58,8 @@ export class OrderItem {
   photo!: Photo;
 }
 
+// One order per payment, enforced by the database. Partial so orders that predate paymentId don't collide.
+@index({ paymentId: 1 }, { unique: true, partialFilterExpression: { paymentId: { $type: 'string' } } })
 @modelOptions({
   schemaOptions: {
     timestamps: true,
@@ -104,6 +106,13 @@ export class Order {
     type: Number,
   })
   coinsRedeemed!: number;
+
+  // Stripe PaymentIntent id: the natural idempotency key for checkout.
+  @prop({
+    type: String,
+    required: [true, 'Order must have a payment id'],
+  })
+  paymentId!: string;
 
   @prop({
     type: mongoose.SchemaTypes.ObjectId,
