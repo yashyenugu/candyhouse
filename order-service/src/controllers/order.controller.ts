@@ -6,6 +6,7 @@ import OrderModel from '@/models/order.model';
 import OutboxModel from '@/models/outbox.model';
 import { orderByIdSchema, orderInputSchema, orderUpdateSchema, orderConfirmSchema, paginatedOrderFetchSchema } from '@/utils/schemas/order';
 import { Status } from '@/utils/types/order';
+import { Role } from '@/utils/types/user';
 import { NextFunction, Response } from 'express';
 import mongoose from 'mongoose';
 import { z } from 'zod';
@@ -32,6 +33,8 @@ const quantitiesByCandy = (items: { candy?: string; itemsInCart?: number }[]): M
   }
   return totals;
 };
+
+const ownsOrder = (order: { user: unknown }, user: { _id: unknown }): boolean => String(order.user) === String(user._id);
 
 export class OrderController {
   public allForAdmin = async (req: RequestWithUser, res: Response, next: NextFunction): Promise<void> => {
@@ -139,7 +142,8 @@ export class OrderController {
 
       const order = await OrderModel.findOne({ _id: id });
 
-      if (!order) {
+      // Customers may only see their own orders; answer 404 for others so existence is not leaked.
+      if (!order || (req.user.role !== Role.Admin && !ownsOrder(order, req.user))) {
         throw new HttpException(404, 'Order not found');
       }
 
@@ -159,12 +163,16 @@ export class OrderController {
       await session.withTransaction(async () => {
         const order = await OrderModel.findOne({ _id: id }).session(session);
 
-        if (!order) {
+        if (!order || !ownsOrder(order, req.user)) {
           throw new HttpException(404, 'order not found');
         }
 
         if (order.status === Status.Cancelled) {
           throw new HttpException(400, 'Order is already cancelled');
+        }
+
+        if (order.status !== Status.Pending) {
+          throw new HttpException(400, `Only pending orders can be cancelled (this order is ${order.status})`);
         }
 
         await OrderModel.findByIdAndUpdate(id, { status: Status.Cancelled }, { session });
