@@ -17,7 +17,11 @@ import Stripe from 'stripe';
 const publishOutbox = async (outboxId: unknown, messages: { key: string; value: string }[]): Promise<void> => {
   try {
     await producer.connect();
-    await producer.send({ topic: 'quantity', messages });
+    // A stable event id per message lets consumers drop redeliveries (same outbox row, same index).
+    await producer.send({
+      topic: 'quantity',
+      messages: messages.map((message, index) => ({ ...message, headers: { eventId: `${String(outboxId)}:${index}` } })),
+    });
     await OutboxModel.updateOne({ _id: outboxId }, { status: 'sent' });
   } catch (error) {
     console.error('Failed to publish outbox event; left pending', error);
