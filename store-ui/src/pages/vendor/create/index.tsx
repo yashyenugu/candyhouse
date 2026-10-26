@@ -15,7 +15,6 @@ import NumberInputControl from "@/components/ui/number-input-control";
 import InputControl from "@/components/ui/input-control";
 import { NextPageWithLayout } from "@/pages/_app";
 import React from "react";
-import { useToast } from "@chakra-ui/react";
 import useImageUpload from "@/hooks/use-image-upload";
 import TextareaControl from "@/components/ui/textarea-control";
 import VendorLayout from "@/layouts/vendor-layout";
@@ -23,7 +22,6 @@ import { useCreateCandyMutation, useSignedUrlQuery } from "@/api/candy";
 import Seo from "@/components/shared/seo";
 
 const CreateCandy: NextPageWithLayout = () => {
-  const toast = useToast();
   const { mutate } = useCreateCandyMutation();
 
   const imageRef = React.useRef<any>();
@@ -71,16 +69,6 @@ const CreateCandy: NextPageWithLayout = () => {
                 return errors;
               }}
               onSubmit={async (values) => {
-                if (!imageDataURI) {
-                  toast({
-                    title: "Add a picture",
-                    description: "Choose an image for your candy before creating it.",
-                    status: "warning",
-                    duration: 4000,
-                    isClosable: true,
-                  });
-                  return;
-                }
                 if (imageDataURI) {
                   const formData = new FormData();
 
