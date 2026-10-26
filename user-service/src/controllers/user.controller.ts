@@ -77,7 +77,8 @@ export const login: ExpressResponse = async (req, res, next) => {
 
 export const getUser: ExpressResponse = async (req, res, next) => {
   try {
-    const token = req.headers.authorization!.split(" ")[1];
+    const header = req.headers.authorization;
+    const token = header?.startsWith("Bearer ") ? header.split(" ")[1] : undefined;
 
     if (!token) {
       return res.status(401).json({
@@ -85,10 +86,17 @@ export const getUser: ExpressResponse = async (req, res, next) => {
       });
     }
 
-    // Verify the token
-    const decodedToken = jwt.decodeToken(token) as any;
+    // Verify the token; a bad or expired token is the caller's problem (401), not a server error.
+    let decodedToken: any;
+    try {
+      decodedToken = jwt.decodeToken(token);
+    } catch {
+      return res.status(401).json({
+        message: "Invalid token",
+      });
+    }
 
-    if (!decodedToken) {
+    if (!decodedToken || typeof decodedToken === "string") {
       return res.status(401).json({
         message: "Invalid token",
       });
