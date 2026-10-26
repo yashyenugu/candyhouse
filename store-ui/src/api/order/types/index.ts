@@ -34,10 +34,18 @@ export type OrderDataItem = {
 export type OrderCreateItem = {
   candy: string;
   itemsInCart: number;
+  name: string;
+  price: number;
+  quantity: number;
+  description: string;
+  photo: { url: string };
 };
 export type OrderCreateBody = {
   items: OrderCreateItem[];
   address: string;
+};
+export type OrderConfirmBody = OrderCreateBody & {
+  paymentIntentId: string;
 };
 
 export type PaginatedOrderResponse = {

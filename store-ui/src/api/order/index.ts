@@ -8,6 +8,7 @@ import {
   Order,
   OrderIdBody,
   OrderCreateBody,
+  OrderConfirmBody,
   PaginatedOrderResponse,
 } from "./types";
 import { useAppDispatch } from "@/store/hooks";
@@ -79,6 +80,19 @@ export const useCreateOrderMutation = () => {
     mutate,
     isPending,
   };
+};
+
+// Finalizes an order once Stripe reports the payment succeeded. The server is idempotent on
+// paymentIntentId, so calling this again for the same payment returns the same order.
+export const confirmOrder = async (body: OrderConfirmBody): Promise<Order> => {
+  const authToken = localStorage.getItem("auth.token");
+  const response = await axios.post(`/order/confirm`, body, {
+    headers: {
+      Authorization: `Bearer ${authToken || ""}`,
+    },
+  });
+
+  return response.data;
 };
 
 export const useGetBanksQuery = () => {
