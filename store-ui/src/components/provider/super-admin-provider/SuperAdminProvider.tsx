@@ -13,7 +13,7 @@ const SuperAdminProvider: React.FC<React.PropsWithChildren> = ({
   React.useEffect(() => {
     (async () => {
       if (!isLoading && (!data || data.user.role !== Role.Admin)) {
-        await router.replace("/");
+        await router.replace(data ? "/" : "/login");
       }
     })();
   }, [router, data, isLoading]);

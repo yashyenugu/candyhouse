@@ -148,6 +148,8 @@ export const useRegisterMutation = () => {
 export const useLoggedInUserQuery = () => {
   const { data, isPending } = useQuery<VerifyResponse>({
     queryKey: [USER_RQ.LOGGED_IN_USER_QUERY],
+    // A 401 means "not logged in", an answer, not a failure to retry for several seconds.
+    retry: false,
     queryFn: async () => {
       // Get the token from localStorage
       const authToken = localStorage.getItem("auth.token");

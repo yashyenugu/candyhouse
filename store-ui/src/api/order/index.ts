@@ -1,4 +1,4 @@
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Axios from "axios";
 import { useToast } from "@chakra-ui/react";
 import { ORDER_RQ } from "@/utils/types/react-query";
@@ -150,6 +150,8 @@ export const useOrderByIdQuery = (id: string) => {
 };
 
 export const useCancelOrderMutation = () => {
+  const queryClient = useQueryClient();
+  const toast = useToast();
   const { data, mutate, isPending } = useMutation<Order, any, OrderIdBody, any>(
     {
       mutationFn: async (data) => {
@@ -167,10 +169,24 @@ export const useCancelOrderMutation = () => {
 
       //   },
       onSuccess() {
-        //
+        // Show the new status (and the order list) without a page reload.
+        void queryClient.invalidateQueries({ queryKey: [ORDER_RQ.ORDER] });
+        void queryClient.invalidateQueries({ queryKey: [ORDER_RQ.PAGINATED_ORDERS] });
+        toast({
+          title: "Order cancelled",
+          status: "success",
+          duration: 3000,
+          isClosable: true,
+        });
       },
-      onError() {
-        //
+      onError(error) {
+        toast({
+          title: "Could not cancel the order",
+          description: error?.response?.data?.message,
+          status: "error",
+          duration: 4000,
+          isClosable: true,
+        });
       },
     }
   );

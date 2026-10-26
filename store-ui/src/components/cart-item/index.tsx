@@ -27,7 +27,7 @@ const CartItem: React.FC<CartItemProps> = ({ candy }) => {
       </GridItem>
       <GridItem colSpan={2}>
         <VStack h="full" alignItems="start" justifyContent={"center"}>
-          <Text fontSize={{base:"sm",sm:"md"}} fontWeight="">
+          <Text fontSize={{base:"sm",sm:"md"}} fontWeight="" textTransform="capitalize">
             {candy.name}
           </Text>
           <Text fontWeight="semibold" fontSize="sm">
@@ -46,6 +46,7 @@ const CartItem: React.FC<CartItemProps> = ({ candy }) => {
         >
           <Button
             size="sm"
+            isDisabled={candy.itemsInCart >= candy.quantity}
             onClick={() => {
               dispatch(addCandyToCart({ candy }));
             }}

@@ -58,7 +58,6 @@ const Candy: NextPageWithLayout = () => {
   const cartCandy = useAppSelector((state) => state.cart.items).find(
     (item) => item._id === candy?._id
   );
-  const { isOpen, onOpen, onClose } = useDisclosure();
   if (isCandyLoading) {
     return <></>;
   }
@@ -67,76 +66,6 @@ const Candy: NextPageWithLayout = () => {
     return (
       <>
         <Seo title="View Candy" />
-        <Modal isOpen={isOpen} onClose={onClose}>
-          <Formik
-            onSubmit={() => {
-              // mutate({
-              //   ...values,
-              //   candy: candy._id,
-              //   rating: parseInt(values.rating),
-              // });
-            }}
-            initialValues={{
-              description: "",
-              rating: "5",
-              title: "",
-            }}
-          >
-            {({ isSubmitting, isValid, dirty }) => (
-              <>
-                <Form>
-                  <ModalOverlay />
-                  <ModalContent>
-                    <ModalHeader>Write a review</ModalHeader>
-
-                    <ModalCloseButton isDisabled={isSubmitting || !isValid} />
-                    <ModalBody>
-                      <SelectControl
-                        label="Rating"
-                        name="rating"
-                        helperText="Rate the candy out of 5"
-                      >
-                        <option value={1}>1</option>
-                        <option value={2}>2</option>
-                        <option value={3}>3</option>
-                        <option value={4}>4</option>
-                        <option value={5}>5</option>
-                      </SelectControl>
-                      <InputControl
-                        name="title"
-                        label="Title"
-                        helperText="Summarize your review in a sentence"
-                      />
-                      <TextareaControl
-                        name="description"
-                        label="Description"
-                        helperText="Describe in detail how you liked the candy"
-                      />
-                    </ModalBody>
-                    <ModalFooter>
-                      <Button
-                        isDisabled={isSubmitting || !isValid}
-                        type="button"
-                        mr={3}
-                        onClick={onClose}
-                      >
-                        Close
-                      </Button>
-                      <Button
-                        isLoading={isSubmitting}
-                        isDisabled={isSubmitting || !isValid || !dirty}
-                        type="submit"
-                        colorScheme="pink"
-                      >
-                        Post
-                      </Button>
-                    </ModalFooter>
-                  </ModalContent>
-                </Form>
-              </>
-            )}
-          </Formik>
-        </Modal>
         <Container
           maxW="4xl"
           py={{ base: "12", md: "24" }}
@@ -162,7 +91,7 @@ const Candy: NextPageWithLayout = () => {
                     <Text textColor="gray.400" fontSize={"sm"}>
                       {(candy.vendor as any).name}
                     </Text>
-                    <Text mt={0} as="h3" fontWeight="medium" fontSize="xl">
+                    <Text mt={0} as="h3" fontWeight="medium" fontSize="xl" textTransform="capitalize">
                       {candy.name}
                       
                     </Text>
@@ -179,6 +108,7 @@ const Candy: NextPageWithLayout = () => {
                     {cartCandy ? (
                       <HStack>
                         <Button
+                          isDisabled={cartCandy.itemsInCart >= candy.quantity}
                           onClick={() => {
                             dispatch(addCandyToCart({ candy }));
                           }}
@@ -196,11 +126,12 @@ const Candy: NextPageWithLayout = () => {
                       </HStack>
                     ) : (
                       <Button
+                        isDisabled={candy.quantity < 1}
                         onClick={() => {
                           dispatch(addCandyToCart({ candy }));
                         }}
                       >
-                        Add to Cart
+                        {candy.quantity < 1 ? "Out of stock" : "Add to Cart"}
                       </Button>
                     )}
                     <Text fontWeight="bold">${candy.price}</Text>
@@ -209,85 +140,6 @@ const Candy: NextPageWithLayout = () => {
               </GridItem>
             </SimpleGrid>
           </Card>
-          <Heading fontSize="3xl" fontWeight="semibold" as="h2" mt={5}>
-            Customer Reviews
-          </Heading>
-          {/* <Flex alignItems="center">
-            <Text fontSize="6xl">{reviews?.averageRating}</Text>
-            <Box ml={2}>
-              <HStack>
-                <Icon
-                  color={reviews!.averageRating >= 1 ? "pink.500" : "gray.200"}
-                  as={FaStar}
-                />
-                <Icon
-                  color={reviews!.averageRating >= 2 ? "pink.500" : "gray.200"}
-                  as={FaStar}
-                />
-                <Icon
-                  color={reviews!.averageRating >= 3 ? "pink.500" : "gray.200"}
-                  as={FaStar}
-                />
-                <Icon
-                  color={reviews!.averageRating >= 4 ? "pink.500" : "gray.200"}
-                  as={FaStar}
-                />
-                <Icon
-                  color={reviews!.averageRating >= 5 ? "pink.500" : "gray.200"}
-                  as={FaStar}
-                />
-              </HStack>
-              <Text>
-                Based on {reviews?.reviews.length} review
-                {reviews!.reviews.length > 1 && "s"}
-              </Text>
-            </Box>
-          </Flex> */}
-
-          <Button colorScheme="pink" onClick={onOpen} mt={3}>
-            Write a review
-          </Button>
-          {/* <Accordion mt={5} allowToggle>
-            {reviews &&
-              reviews.reviews.map((review, i) => (
-                <AccordionItem key={i}>
-                  <h2>
-                    <AccordionButton>
-                      <Flex
-                        as="span"
-                        justifyContent="space-between"
-                        w="full"
-                        textAlign="left"
-                        pr={4}
-                      >
-                        <Text fontWeight="semibold">{review.title}</Text>
-
-                        <Box>
-                          {Array(review.rating)
-                            .fill(0)
-                            .map((_, i) => (
-                              <Icon color="pink.500" key={i} as={FaStar} />
-                            ))}
-                          {Array(5 - review.rating)
-                            .fill(0)
-                            .map((_, i) => (
-                              <Icon color="gray.200" key={i} as={FaStar} />
-                            ))}
-                        </Box>
-                      </Flex>
-                      <AccordionIcon />
-                    </AccordionButton>
-                  </h2>
-                  <AccordionPanel pb={4}>
-                    <Text fontSize="md">{review.description}</Text>
-
-                    <Text mt={4} color="gray.400" fontSize="sm">
-                      by {(review.reviewer as any).name}
-                    </Text>
-                  </AccordionPanel>
-                </AccordionItem>
-              ))}
-          </Accordion> */}
         </Container>
       </>
     );
