@@ -9,7 +9,8 @@ import { OrderController } from '@/controllers/order.controller';
 import { Status } from '@/utils/types/order';
 
 const mockRetrieve = jest.fn();
-jest.mock('stripe', () => jest.fn().mockImplementation(() => ({ paymentIntents: { retrieve: mockRetrieve } })));
+const mockCreateIntent = jest.fn();
+jest.mock('stripe', () => jest.fn().mockImplementation(() => ({ paymentIntents: { retrieve: mockRetrieve, create: mockCreateIntent } })));
 const mockSend = jest.fn();
 jest.mock('@/lib/kafka', () => ({
   producer: { connect: jest.fn(), send: (...args: unknown[]) => mockSend(...args) },
@@ -66,6 +67,7 @@ afterAll(async () => {
 beforeEach(async () => {
   jest.clearAllMocks();
   mockRetrieve.mockResolvedValue({ status: 'succeeded', amount: 400 });
+  mockCreateIntent.mockResolvedValue({ client_secret: 'cs_test' });
   await Promise.all([OrderModel.deleteMany({}), OutboxModel.deleteMany({}), CandyModel.deleteMany({})]);
 });
 
@@ -197,5 +199,60 @@ describe('cancel', () => {
 
     expect(next).toHaveBeenCalledWith(expect.objectContaining({ status: 400 }));
     expect(await OutboxModel.countDocuments()).toBe(0);
+  });
+});
+
+describe('stock', () => {
+  const localQuantity = async (appId: string) => (await CandyModel.findOne({ appId }))?.quantity;
+  const owner = { _id: userId, role: 'user' };
+
+  it("decrements this service's copy on checkout and restores it on cancel", async () => {
+    await seedCandy('c1', 5);
+    const { res } = await run(controller.confirmAndCreate, { ...checkoutReq('c1', 2), user: owner });
+    expect(await localQuantity('c1')).toBe(3);
+
+    const orderId = res.send.mock.calls[0][0]._id;
+    await run(controller.cancel, { user: owner, params: { id: String(orderId) } });
+    expect(await localQuantity('c1')).toBe(5);
+  });
+
+  it('refuses a second purchase that exceeds what is left, without creating an order', async () => {
+    await seedCandy('c1', 3);
+    await run(controller.confirmAndCreate, checkoutReq('c1', 2, 'pi_a'));
+    const second = await run(controller.confirmAndCreate, checkoutReq('c1', 2, 'pi_b'));
+
+    expect(second.next).toHaveBeenCalledWith(expect.objectContaining({ status: 400 }));
+    expect(await OrderModel.countDocuments()).toBe(1);
+    expect(await localQuantity('c1')).toBe(1);
+  });
+
+  it('never oversells when concurrent checkouts compete for the last items', async () => {
+    await seedCandy('c1', 3);
+    const results = await Promise.all(['pi_1', 'pi_2', 'pi_3'].map(pi => run(controller.confirmAndCreate, checkoutReq('c1', 2, pi))));
+
+    expect(results.filter(r => r.res.send.mock.calls.length > 0)).toHaveLength(1);
+    expect(await OrderModel.countDocuments()).toBe(1);
+    expect(await localQuantity('c1')).toBe(1);
+  });
+
+  it('rejects creating a payment for more than the available stock, before Stripe is called', async () => {
+    await seedCandy('c1', 3);
+    const { next, res } = await run(controller.create, { user: owner, body: { address: 'a', items: [item('c1', 4)] } });
+
+    expect(next).toHaveBeenCalledWith(expect.objectContaining({ status: 400 }));
+    expect(res.send).not.toHaveBeenCalled();
+    expect(mockCreateIntent).not.toHaveBeenCalled();
+  });
+
+  it('rejects creating a payment for a candy that does not exist', async () => {
+    const { next } = await run(controller.create, { user: owner, body: { address: 'a', items: [item('ghost', 1)] } });
+    expect(next).toHaveBeenCalledWith(expect.objectContaining({ status: 400 }));
+    expect(mockCreateIntent).not.toHaveBeenCalled();
+  });
+
+  it('creates the payment when stock is sufficient', async () => {
+    await seedCandy('c1', 3);
+    const { res } = await run(controller.create, { user: owner, body: { address: 'a', items: [item('c1', 3)] } });
+    expect(res.send).toHaveBeenCalledWith({ clientSecret: 'cs_test' });
   });
 });

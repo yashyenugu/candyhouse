@@ -24,6 +24,15 @@ const publishOutbox = async (outboxId: unknown, messages: { key: string; value: 
   }
 };
 
+// Total requested per candy (the same candy can appear on more than one line).
+const quantitiesByCandy = (items: { candy?: string; itemsInCart?: number }[]): Map<string, number> => {
+  const totals = new Map<string, number>();
+  for (const { candy, itemsInCart } of items) {
+    if (candy) totals.set(candy, (totals.get(candy) ?? 0) + (itemsInCart ?? 0));
+  }
+  return totals;
+};
+
 export class OrderController {
   public allForAdmin = async (req: RequestWithUser, res: Response, next: NextFunction): Promise<void> => {
     try {
@@ -58,6 +67,18 @@ export class OrderController {
   public create = async (req: RequestWithUser, res: Response, next: NextFunction): Promise<void> => {
     try {
       const { items, address }: z.infer<typeof orderInputSchema> = req.body;
+
+      // Refuse before any payment is started: a charge we cannot fulfil is the worst outcome.
+      const requested = quantitiesByCandy(items);
+      const candies = await CandyModel.find({ appId: { $in: [...requested.keys()] } });
+      for (const [appId, wanted] of requested) {
+        const candy = candies.find(c => c.appId === appId);
+        if (!candy) throw new HttpException(400, 'One of the candies in your cart is no longer available');
+        if (candy.quantity < wanted) {
+          throw new HttpException(400, `Insufficient stock for ${candy.name}: only ${candy.quantity} left`);
+        }
+      }
+
       // Calculate total
       let total = 0;
       for (const x of items) {
@@ -148,6 +169,11 @@ export class OrderController {
 
         await OrderModel.findByIdAndUpdate(id, { status: Status.Cancelled }, { session });
 
+        // Give the stock back to this service's copy in the same transaction.
+        for (const [appId, count] of quantitiesByCandy(order.items.map(i => ({ candy: i.candy, itemsInCart: i.itemsInCart })))) {
+          await CandyModel.updateOne({ appId }, { $inc: { quantity: count } }, { session });
+        }
+
         // Restock is a positive delta, recorded in the same transaction as the cancellation.
         restock = order.items.map(orderItem => ({
           key: orderItem.candy,
@@ -215,12 +241,16 @@ export class OrderController {
           return;
         }
 
-        const candyIds = [...new Set(transformedItems.map(item => item.candy))];
-        const candyDocuments = await CandyModel.find({ appId: { $in: candyIds } }).session(session);
-        for (const candyDocument of candyDocuments) {
-          const numItems = transformedItems.find(item => item.candy == candyDocument.appId)?.itemsInCart ?? 0;
-          if (candyDocument.quantity - numItems < 0) {
-            throw new HttpException(400, 'Insufficient stock for candy ' + candyDocument.name);
+        // Reserve stock atomically: the update only matches while enough is left, so two orders can
+        // never both take the last item. Throwing rolls the whole transaction back.
+        for (const [appId, wanted] of quantitiesByCandy(transformedItems)) {
+          const reserved = await CandyModel.updateOne({ appId, quantity: { $gte: wanted } }, { $inc: { quantity: -wanted } }, { session });
+          if (reserved.matchedCount === 0) {
+            const candy = await CandyModel.findOne({ appId }).session(session);
+            throw new HttpException(
+              400,
+              candy ? `Insufficient stock for ${candy.name}: only ${candy.quantity} left` : 'Candy is no longer available',
+            );
           }
         }
 
