@@ -174,7 +174,7 @@ describe('idempotent checkout', () => {
 describe('cancel', () => {
   it('cancels and records a positive restock delta', async () => {
     const order = await OrderModel.create({ user: userId, items: [item('c1', 2)], address: 'a', price: 4, coinsRedeemed: 0, paymentId: 'pi_c' });
-    const { next } = await run(controller.cancel, { params: { id: order._id.toString() } });
+    const { next } = await run(controller.cancel, { user: { _id: userId }, params: { id: order._id.toString() } });
 
     expect(next).not.toHaveBeenCalled();
     expect((await OrderModel.findById(order._id))?.status).toBe(Status.Cancelled);
@@ -193,9 +193,48 @@ describe('cancel', () => {
       paymentId: 'pi_c',
       status: Status.Cancelled,
     });
-    const { next } = await run(controller.cancel, { params: { id: order._id.toString() } });
+    const { next } = await run(controller.cancel, { user: { _id: userId }, params: { id: order._id.toString() } });
 
     expect(next).toHaveBeenCalledWith(expect.objectContaining({ status: 400 }));
+    expect(await OutboxModel.countDocuments()).toBe(0);
+  });
+});
+
+describe('order ownership', () => {
+  const otherUser = { _id: new mongoose.Types.ObjectId(), role: 'user' };
+  const owner = { _id: userId, role: 'user' };
+  const admin = { _id: new mongoose.Types.ObjectId(), role: 'admin' };
+
+  const makeOrder = (status = Status.Pending) =>
+    OrderModel.create({ user: userId, items: [item('c1', 2)], address: 'a', price: 4, coinsRedeemed: 0, paymentId: `pi_${status}`, status });
+
+  it('lets the owner and an admin read an order but hides it from other customers', async () => {
+    const order = await makeOrder();
+    const params = { id: order._id.toString() };
+
+    expect((await run(controller.oneById, { user: owner, params })).res.send).toHaveBeenCalled();
+    expect((await run(controller.oneById, { user: admin, params })).res.send).toHaveBeenCalled();
+
+    const other = await run(controller.oneById, { user: otherUser, params });
+    expect(other.res.send).not.toHaveBeenCalled();
+    expect(other.next).toHaveBeenCalledWith(expect.objectContaining({ status: 404 }));
+  });
+
+  it("does not let another customer cancel someone else's order", async () => {
+    const order = await makeOrder();
+    const { next } = await run(controller.cancel, { user: otherUser, params: { id: order._id.toString() } });
+
+    expect(next).toHaveBeenCalledWith(expect.objectContaining({ status: 404 }));
+    expect((await OrderModel.findById(order._id))?.status).toBe(Status.Pending);
+    expect(await OutboxModel.countDocuments()).toBe(0);
+  });
+
+  it('refuses to cancel an order that is already delivered', async () => {
+    const order = await makeOrder(Status.Delivered);
+    const { next } = await run(controller.cancel, { user: owner, params: { id: order._id.toString() } });
+
+    expect(next).toHaveBeenCalledWith(expect.objectContaining({ status: 400 }));
+    expect((await OrderModel.findById(order._id))?.status).toBe(Status.Delivered);
     expect(await OutboxModel.countDocuments()).toBe(0);
   });
 });
