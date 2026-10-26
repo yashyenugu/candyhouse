@@ -42,6 +42,14 @@ describe('redis util', () => {
     expect(opts.name).toBe('mymaster');
   });
 
+  it('lets REDIS_USE_SENTINEL=false override production', () => {
+    process.env.NODE_ENV = 'production';
+    process.env.REDIS_USE_SENTINEL = 'false';
+    require('@/utils/redis');
+    const opts = RedisCtor.mock.calls[0][0] as Record<string, unknown>;
+    expect(opts.sentinels).toBeUndefined();
+  });
+
   it('getCache parses JSON and returns null on miss', async () => {
     const { getCache } = require('@/utils/redis');
     redisMock.get.mockResolvedValueOnce('{"a":1}').mockResolvedValueOnce(null);

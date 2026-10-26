@@ -4,7 +4,9 @@ import Redis, { RedisOptions } from 'ioredis';
 // ioredis supports Redis Sentinel natively (node-redis v4 does not), which is
 // why the Sentinel config below now actually takes effect in production.
 const isProduction = process.env.NODE_ENV === 'production';
-const useSentinel = process.env.REDIS_USE_SENTINEL === 'true' || isProduction;
+// Sentinel by default in production; REDIS_USE_SENTINEL=true/false overrides either way
+// (a single-Redis container runs with NODE_ENV=production but has no Sentinel).
+const useSentinel = process.env.REDIS_USE_SENTINEL ? process.env.REDIS_USE_SENTINEL === 'true' : isProduction;
 
 const options: RedisOptions = useSentinel
   ? {

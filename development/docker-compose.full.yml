@@ -1,0 +1,105 @@
+# Whole CandyHouse stack in containers: infra (from docker-compose.dev.yml) + the four services.
+#
+#   docker compose -f development/docker-compose.full.yml up --build
+#
+# UI:  http://localhost:${UI_PORT:-3000}     user 4000, product 4001, order 4002
+# Override host ports that clash with other projects, e.g. REDIS_PORT=6380 UI_PORT=3001.
+# Stripe and Cloudinary values are optional; without them checkout and image upload fail,
+# everything else works. Pass them from your shell or a gitignored env file:
+#   STRIPE_SECRET_KEY=sk_test_... NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=pk_test_... docker compose ...
+#
+# Mongo is a single-node replica set whose member is "localhost:27017", so containers connect with
+# directConnection=true (no replica set discovery). Transactions still work through the primary.
+# The values below are local development defaults, not secrets.
+
+include:
+  - docker-compose.dev.yml
+
+x-service-defaults: &service-defaults
+  restart: unless-stopped
+  networks:
+    - candyhouse-dev
+  depends_on: &service-deps
+    mongodb:
+      condition: service_healthy
+    kafka-init:
+      condition: service_completed_successfully
+
+x-common-env: &common-env
+  JWT_SECRET: dev-only-shared-secret-change-me-0123456789
+  KAFKA_URL: kafka:19092
+  KAFKAJS_NO_PARTITIONER_WARNING: "1"
+
+services:
+  user-service:
+    <<: *service-defaults
+    build: ../user-service
+    container_name: candyhouse-user-service-dev
+    ports:
+      - "4000:4000"
+    environment:
+      <<: *common-env
+      NODE_ENV: production
+      PORT: "4000"
+      MONGO_URI: mongodb://mongodb:27017/candyhouse-users?directConnection=true
+      JWT_EXPIRES_IN: "24"
+
+  product-service:
+    <<: *service-defaults
+    build: ../product-service
+    container_name: candyhouse-product-service-dev
+    depends_on:
+      <<: *service-deps
+      redis:
+        condition: service_started
+    ports:
+      - "4001:4001"
+    environment:
+      <<: *common-env
+      NODE_ENV: production
+      PORT: "4001"
+      SECRET_KEY: dev-only-shared-secret-change-me-0123456789
+      MONGO_URI: mongodb://mongodb:27017/candyhouse-products?directConnection=true
+      REDIS_USE_SENTINEL: "false"
+      REDIS_HOST: redis
+      REDIS_PASSWORD: dev-redis-password
+      LOG_FORMAT: dev
+      LOG_DIR: ../../logs
+      ORIGIN: http://localhost:${UI_PORT:-3000}
+      CREDENTIALS: "true"
+      CLOUDINARY_CLOUD_NAME: ${CLOUDINARY_CLOUD_NAME:-unset}
+      CLOUDINARY_API_KEY: ${CLOUDINARY_API_KEY:-unset}
+      CLOUDINARY_API_SECRET: ${CLOUDINARY_API_SECRET:-unset}
+      CLOUDINARY_FOLDER_NAME: ${CLOUDINARY_FOLDER_NAME:-candyhouse}
+
+  order-service:
+    <<: *service-defaults
+    build: ../order-service
+    container_name: candyhouse-order-service-dev
+    ports:
+      - "4002:4002"
+    environment:
+      <<: *common-env
+      NODE_ENV: production
+      PORT: "4002"
+      SECRET_KEY: dev-only-shared-secret-change-me-0123456789
+      MONGO_URI: mongodb://mongodb:27017/candyhouse-orders?directConnection=true
+      LOG_FORMAT: dev
+      LOG_DIR: ../../logs
+      ORIGIN: http://localhost:${UI_PORT:-3000}
+      CREDENTIALS: "true"
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+
+  store-ui:
+    restart: unless-stopped
+    build:
+      context: ../store-ui
+      args:
+        NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: ${NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY:-}
+    container_name: candyhouse-store-ui-dev
+    networks:
+      - candyhouse-dev
+    ports:
+      - "${UI_PORT:-3000}:3000"
+    environment:
+      PORT: "3000"

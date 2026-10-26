@@ -23,6 +23,18 @@ Services communicate by Kafka events (topics `user`, `candy`, `quantity`) and HT
 
 ## How to run it locally
 
+Fastest: the whole stack in containers, one command (infra, Kafka topics, and the four services):
+
+```bash
+docker compose -f development/docker-compose.full.yml up --build
+```
+
+Host ports 3000 and 6379 are often taken; override with `UI_PORT=3001 REDIS_PORT=6380`. Stripe and Cloudinary
+values are optional (see the header of `development/docker-compose.full.yml`). The compose file creates the Kafka
+topics (`user`, `candy`, `quantity`) itself; if you start infra another way, create them before the services boot.
+
+To run services natively instead:
+
 Infrastructure (MongoDB, Redis, Kafka) runs in Docker; the services run natively.
 
 ```bash
