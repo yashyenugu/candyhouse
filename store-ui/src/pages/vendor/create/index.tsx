@@ -15,6 +15,7 @@ import NumberInputControl from "@/components/ui/number-input-control";
 import InputControl from "@/components/ui/input-control";
 import { NextPageWithLayout } from "@/pages/_app";
 import React from "react";
+import { useToast } from "@chakra-ui/react";
 import useImageUpload from "@/hooks/use-image-upload";
 import TextareaControl from "@/components/ui/textarea-control";
 import VendorLayout from "@/layouts/vendor-layout";
@@ -22,6 +23,7 @@ import { useCreateCandyMutation, useSignedUrlQuery } from "@/api/candy";
 import Seo from "@/components/shared/seo";
 
 const CreateCandy: NextPageWithLayout = () => {
+  const toast = useToast();
   const { mutate } = useCreateCandyMutation();
 
   const imageRef = React.useRef<any>();
@@ -61,7 +63,24 @@ const CreateCandy: NextPageWithLayout = () => {
                 quantity: 0,
               }}
               //validationSchema={toFormikValidationSchema(candySchema)}
+              validate={(values) => {
+                const errors: { name?: string; description?: string; price?: string } = {};
+                if (!values.name.trim()) errors.name = "Name is required";
+                if (!values.description.trim()) errors.description = "Description is required";
+                if (!(Number(values.price) > 0)) errors.price = "Price must be greater than 0";
+                return errors;
+              }}
               onSubmit={async (values) => {
+                if (!imageDataURI) {
+                  toast({
+                    title: "Add a picture",
+                    description: "Choose an image for your candy before creating it.",
+                    status: "warning",
+                    duration: 4000,
+                    isClosable: true,
+                  });
+                  return;
+                }
                 if (imageDataURI) {
                   const formData = new FormData();
 
@@ -93,6 +112,8 @@ const CreateCandy: NextPageWithLayout = () => {
                     console.log("mutating with d as ", d);
                     mutate({
                       ...values,
+                      price: Number(values.price),
+                      quantity: Number(values.quantity),
                       photo,
                     });
                   });
@@ -108,7 +129,7 @@ const CreateCandy: NextPageWithLayout = () => {
                     placeholder="Name"
                   />
 
-                  <NumberInputControl name="price" label="Price" />
+                  <NumberInputControl name="price" label="Price" allowDecimals />
                   <NumberInputControl name="quantity" label="Quantity" />
                   <Input
                     display="none"

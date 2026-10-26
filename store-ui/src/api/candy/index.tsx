@@ -1,5 +1,7 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import Axios from "axios";
+import { useToast } from "@chakra-ui/react";
+import { useRouter } from "next/router";
 import { PRODUCT_RQ } from "@/utils/types/react-query";
 import {
   Candy,
@@ -78,6 +80,8 @@ export const useCandyByIdQuery = (id: string) => {
 };
 
 export const useCreateCandyMutation = () => {
+  const toast = useToast();
+  const router = useRouter();
   const { data, mutate, isPending } = useMutation<Candy, any, CandyData, any>({
     mutationFn: async (data) => {
       const authToken = localStorage.getItem("auth.token");
@@ -94,15 +98,25 @@ export const useCreateCandyMutation = () => {
 
     //   },
     onSuccess: () => {
-      // let redirect;
-      // if (data.user.role === Role.User) {
-      //   redirect = "/store";
-      // } else if (data.user.role === Role.Admin) {
-      //   redirect = "/admin/dashboard";
-      // } else {
-      //   redirect = "/vendor/dashboard";
-      // }
-      // router.replace(redirect);
+      toast({
+        title: "Candy created",
+        description: "Your candy is now listed in the store.",
+        status: "success",
+        duration: 4000,
+        isClosable: true,
+      });
+      void router.push("/vendor/dashboard");
+    },
+    onError: (error) => {
+      toast({
+        title: "Could not create candy",
+        description:
+          error?.response?.data?.message ??
+          "Something went wrong. A candy with this name may already exist.",
+        status: "error",
+        duration: 5000,
+        isClosable: true,
+      });
     },
     //   onError: (error) => {
 

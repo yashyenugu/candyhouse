@@ -3,7 +3,6 @@ import {
   CardBody,
   CardHeader,
   Text,
-  Badge,
   Flex,
   Box,
   LinkBox,
@@ -41,9 +40,6 @@ const VendorCandyCard: React.FC<CandyCardProps> = ({ candy }) => {
           <LinkOverlay as={NextLink} href={`/vendor/candy/${candy._id}`}>
             <Text mt={0} as="h3" fontWeight="medium" fontSize="xl">
               {candy.name}
-              <Badge ml={2} colorScheme="purple">
-                New
-              </Badge>
             </Text>
           </LinkOverlay>
         </CardHeader>
@@ -56,8 +52,11 @@ const VendorCandyCard: React.FC<CandyCardProps> = ({ candy }) => {
               <Flex></Flex>
             </Box>
             <Box>
-              <Text mb={2} mt={4} fontWeight={"medium"}>
-                # {candy.price}
+              <Text mt={4} fontWeight={"medium"}>
+                $ {candy.price}
+              </Text>
+              <Text mb={2} fontSize="sm" textColor="gray.500">
+                {candy.quantity} in stock
               </Text>
             </Box>
           </Flex>
