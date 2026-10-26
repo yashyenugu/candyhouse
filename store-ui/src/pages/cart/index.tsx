@@ -27,8 +27,9 @@ import CartItem from "@/components/cart-item";
 import InputControl from "@/components/ui/input-control";
 
 import { useLoggedInUserQuery } from "@/api/user";
-import { useCreateOrderMutation } from "@/api/order";
+import { confirmOrder, useCreateOrderMutation } from "@/api/order";
 import { OrderCreateItem } from "@/api/order/types";
+import { CartCandy } from "@/store/types";
 import Seo from "@/components/shared/seo";
 // import PaymentModal from "@/components/payment-modal";
 import { useState } from 'react';
@@ -94,6 +95,18 @@ const US_STATES = [
   { value: 'DC', label: 'District of Columbia' }
 ];
 
+// Shape the order endpoints expect: the full item, keyed by the candy's appId.
+const buildOrderItems = (items: CartCandy[]): OrderCreateItem[] =>
+  items.map(({ itemsInCart, appId, name, price, quantity, description, photo }) => ({
+    candy: appId,
+    itemsInCart,
+    name,
+    price,
+    quantity,
+    description,
+    photo: { url: photo.url },
+  }));
+
 const Cart: NextPageWithLayout = () => {
   
   const cartItems = useAppSelector((state) => state.cart.items);
@@ -101,6 +114,10 @@ const Cart: NextPageWithLayout = () => {
   const cartPrice = useAppSelector((state) => state.cart.price);
 
   const [clientSecret, setClientSecret] = useState<string | null>(null);
+  const [orderAddress, setOrderAddress] = useState("");
+  // Set once Stripe has charged the card, so a failed order confirmation can be retried
+  // without charging again.
+  const [paidIntentId, setPaidIntentId] = useState<string | null>(null);
   const [paymentSuccess, setPaymentSuccess] = useState(false);
   // const [formAddress, setFormAddress] = useState('');
 
@@ -134,33 +151,60 @@ const Cart: NextPageWithLayout = () => {
     const [error, setError] = useState<string | null>(null);
     const [orderConfirmed, setOrderConfirmed] = useState(false);
 
+    // Create the order on the backend for a payment that has already succeeded.
+    const finalizeOrder = async (paymentIntentId: string) => {
+      try {
+        await confirmOrder({
+          paymentIntentId,
+          address: orderAddress,
+          items: buildOrderItems(cartItems),
+        });
+      } catch {
+        setLoading(false);
+        setError(
+          "Your payment went through but we could not finalize the order. Press the button again to retry; you will not be charged twice."
+        );
+        return;
+      }
+      setOrderConfirmed(true);
+      setPaymentSuccess(true);
+      setLoading(false);
+      dispatch(clearCart());
+      setTimeout(() => {
+        void router.push('/user/profile/orders');
+      }, 2000);
+    };
+
     const handleSubmit = async (e: React.FormEvent) => {
       e.preventDefault();
       if (!stripe || !elements) return;
       setLoading(true);
       setError(null);
-      
+
+      // The card was already charged; only the order confirmation needs another try.
+      if (paidIntentId) {
+        await finalizeOrder(paidIntentId);
+        return;
+      }
+
       const cardNumberElement = elements.getElement(CardNumberElement);
-      if (!cardNumberElement) return;
-      
+      if (!cardNumberElement) {
+        setLoading(false);
+        return;
+      }
+
       const result = await stripe.confirmCardPayment(clientSecret!, {
         payment_method: {
           card: cardNumberElement,
         },
       });
-      
+
       if (result.error) {
         setLoading(false);
         setError(typeof result.error.message === 'string' ? result.error.message : 'Payment failed');
       } else if (result.paymentIntent && result.paymentIntent.status === 'succeeded') {
-        // Webhook-based finalization: show success and let backend finalize via webhook
-        setOrderConfirmed(true);
-        setPaymentSuccess(true);
-        setLoading(false);
-        dispatch(clearCart());
-        setTimeout(() => {
-          void router.push('/user/profile/orders');
-        }, 2000);
+        setPaidIntentId(result.paymentIntent.id);
+        await finalizeOrder(result.paymentIntent.id);
       } else {
         setLoading(false);
         setError('Payment not successful');
@@ -413,14 +457,7 @@ const Cart: NextPageWithLayout = () => {
                         
                         const fullAddress = addressParts.join(", ");
                         
-                        const items = [] as OrderCreateItem[];
-
-                        cartItems.forEach(({ itemsInCart, appId }) => {
-                          items.push({
-                            candy: appId,
-                            itemsInCart,
-                          });
-                        });
+                        const items = buildOrderItems(cartItems);
 
                         createOrder(
                           { items, address: fullAddress },
@@ -428,6 +465,7 @@ const Cart: NextPageWithLayout = () => {
                             onSuccess: (data: { clientSecret?: string } | any) => {
                               const cs = data?.clientSecret;
                               if (typeof cs === 'string') {
+                                setOrderAddress(fullAddress);
                                 setClientSecret(cs);
                               }
                             },
