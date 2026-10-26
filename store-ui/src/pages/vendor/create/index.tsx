@@ -61,6 +61,13 @@ const CreateCandy: NextPageWithLayout = () => {
                 quantity: 0,
               }}
               //validationSchema={toFormikValidationSchema(candySchema)}
+              validate={(values) => {
+                const errors: { name?: string; description?: string; price?: string } = {};
+                if (!values.name.trim()) errors.name = "Name is required";
+                if (!values.description.trim()) errors.description = "Description is required";
+                if (!(Number(values.price) > 0)) errors.price = "Price must be greater than 0";
+                return errors;
+              }}
               onSubmit={async (values) => {
                 if (imageDataURI) {
                   const formData = new FormData();
@@ -93,6 +100,8 @@ const CreateCandy: NextPageWithLayout = () => {
                     console.log("mutating with d as ", d);
                     mutate({
                       ...values,
+                      price: Number(values.price),
+                      quantity: Number(values.quantity),
                       photo,
                     });
                   });
@@ -108,7 +117,7 @@ const CreateCandy: NextPageWithLayout = () => {
                     placeholder="Name"
                   />
 
-                  <NumberInputControl name="price" label="Price" />
+                  <NumberInputControl name="price" label="Price" allowDecimals />
                   <NumberInputControl name="quantity" label="Quantity" />
                   <Input
                     display="none"

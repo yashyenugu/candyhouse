@@ -106,12 +106,16 @@ const Candy: NextPageWithLayout = () => {
                       console.log("mutating with d as ", d);
                       mutate({
                         ...values,
+                        price: Number(values.price),
+                        quantity: Number(values.quantity),
                         photo,
                       });
                     });
                   } else {
                     mutate({
                       ...values,
+                      price: Number(values.price),
+                      quantity: Number(values.quantity),
                     });
                   }
                 }}
@@ -131,7 +135,7 @@ const Candy: NextPageWithLayout = () => {
                           placeholder="Name"
                         />
 
-                        <NumberInputControl name="price" label="Price" />
+                        <NumberInputControl name="price" label="Price" allowDecimals />
                         <NumberInputControl name="quantity" label="Quantity" />
                         <Input
                           display="none"

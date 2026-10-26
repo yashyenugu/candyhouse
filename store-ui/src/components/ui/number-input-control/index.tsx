@@ -15,6 +15,8 @@ import { BaseProps, FormControl } from "@/components/ui/form-control";
 export type NumberInputControlProps = BaseProps & {
   numberInputProps?: NumberInputProps;
   showStepper?: boolean;
+  // Keep what the user typed (e.g. "3." or "3.5") instead of forcing a whole number.
+  allowDecimals?: boolean;
   children?: React.ReactNode;
 };
 
@@ -27,6 +29,7 @@ export const NumberInputControl: FC<NumberInputControlProps> = React.forwardRef(
       name,
       label,
       showStepper = true,
+      allowDecimals = false,
       children,
       numberInputProps,
       ...rest
@@ -35,7 +38,7 @@ export const NumberInputControl: FC<NumberInputControlProps> = React.forwardRef(
     const { setFieldValue, isSubmitting } = useFormikContext();
 
     const $setFieldValue = (name: string) => (value: string) =>
-      setFieldValue(name, parseInt(value));
+      setFieldValue(name, allowDecimals ? value : parseInt(value) || 0);
 
     return (
       <FormControl name={name} label={label} {...rest}>
