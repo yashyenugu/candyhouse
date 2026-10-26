@@ -9,7 +9,8 @@ import { OrderController } from '@/controllers/order.controller';
 import { Status } from '@/utils/types/order';
 
 const mockRetrieve = jest.fn();
-jest.mock('stripe', () => jest.fn().mockImplementation(() => ({ paymentIntents: { retrieve: mockRetrieve } })));
+const mockCreateIntent = jest.fn();
+jest.mock('stripe', () => jest.fn().mockImplementation(() => ({ paymentIntents: { retrieve: mockRetrieve, create: mockCreateIntent } })));
 const mockSend = jest.fn();
 jest.mock('@/lib/kafka', () => ({
   producer: { connect: jest.fn(), send: (...args: unknown[]) => mockSend(...args) },
@@ -66,6 +67,7 @@ afterAll(async () => {
 beforeEach(async () => {
   jest.clearAllMocks();
   mockRetrieve.mockResolvedValue({ status: 'succeeded', amount: 400 });
+  mockCreateIntent.mockResolvedValue({ client_secret: 'cs_test' });
   await Promise.all([OrderModel.deleteMany({}), OutboxModel.deleteMany({}), CandyModel.deleteMany({})]);
 });
 
@@ -174,7 +176,7 @@ describe('idempotent checkout', () => {
 describe('cancel', () => {
   it('cancels and records a positive restock delta', async () => {
     const order = await OrderModel.create({ user: userId, items: [item('c1', 2)], address: 'a', price: 4, coinsRedeemed: 0, paymentId: 'pi_c' });
-    const { next } = await run(controller.cancel, { params: { id: order._id.toString() } });
+    const { next } = await run(controller.cancel, { user: { _id: userId }, params: { id: order._id.toString() } });
 
     expect(next).not.toHaveBeenCalled();
     expect((await OrderModel.findById(order._id))?.status).toBe(Status.Cancelled);
@@ -193,9 +195,103 @@ describe('cancel', () => {
       paymentId: 'pi_c',
       status: Status.Cancelled,
     });
-    const { next } = await run(controller.cancel, { params: { id: order._id.toString() } });
+    const { next } = await run(controller.cancel, { user: { _id: userId }, params: { id: order._id.toString() } });
 
     expect(next).toHaveBeenCalledWith(expect.objectContaining({ status: 400 }));
+    expect(await OutboxModel.countDocuments()).toBe(0);
+  });
+});
+
+describe('stock', () => {
+  const localQuantity = async (appId: string) => (await CandyModel.findOne({ appId }))?.quantity;
+  const owner = { _id: userId, role: 'user' };
+
+  it("decrements this service's copy on checkout and restores it on cancel", async () => {
+    await seedCandy('c1', 5);
+    const { res } = await run(controller.confirmAndCreate, { ...checkoutReq('c1', 2), user: owner });
+    expect(await localQuantity('c1')).toBe(3);
+
+    const orderId = res.send.mock.calls[0][0]._id;
+    await run(controller.cancel, { user: owner, params: { id: String(orderId) } });
+    expect(await localQuantity('c1')).toBe(5);
+  });
+
+  it('refuses a second purchase that exceeds what is left, without creating an order', async () => {
+    await seedCandy('c1', 3);
+    await run(controller.confirmAndCreate, checkoutReq('c1', 2, 'pi_a'));
+    const second = await run(controller.confirmAndCreate, checkoutReq('c1', 2, 'pi_b'));
+
+    expect(second.next).toHaveBeenCalledWith(expect.objectContaining({ status: 400 }));
+    expect(await OrderModel.countDocuments()).toBe(1);
+    expect(await localQuantity('c1')).toBe(1);
+  });
+
+  it('never oversells when concurrent checkouts compete for the last items', async () => {
+    await seedCandy('c1', 3);
+    const results = await Promise.all(['pi_1', 'pi_2', 'pi_3'].map(pi => run(controller.confirmAndCreate, checkoutReq('c1', 2, pi))));
+
+    expect(results.filter(r => r.res.send.mock.calls.length > 0)).toHaveLength(1);
+    expect(await OrderModel.countDocuments()).toBe(1);
+    expect(await localQuantity('c1')).toBe(1);
+  });
+
+  it('rejects creating a payment for more than the available stock, before Stripe is called', async () => {
+    await seedCandy('c1', 3);
+    const { next, res } = await run(controller.create, { user: owner, body: { address: 'a', items: [item('c1', 4)] } });
+
+    expect(next).toHaveBeenCalledWith(expect.objectContaining({ status: 400 }));
+    expect(res.send).not.toHaveBeenCalled();
+    expect(mockCreateIntent).not.toHaveBeenCalled();
+  });
+
+  it('rejects creating a payment for a candy that does not exist', async () => {
+    const { next } = await run(controller.create, { user: owner, body: { address: 'a', items: [item('ghost', 1)] } });
+    expect(next).toHaveBeenCalledWith(expect.objectContaining({ status: 400 }));
+    expect(mockCreateIntent).not.toHaveBeenCalled();
+  });
+
+  it('creates the payment when stock is sufficient', async () => {
+    await seedCandy('c1', 3);
+    const { res } = await run(controller.create, { user: owner, body: { address: 'a', items: [item('c1', 3)] } });
+    expect(res.send).toHaveBeenCalledWith({ clientSecret: 'cs_test' });
+  });
+});
+
+describe('order ownership', () => {
+  const otherUser = { _id: new mongoose.Types.ObjectId(), role: 'user' };
+  const owner = { _id: userId, role: 'user' };
+  const admin = { _id: new mongoose.Types.ObjectId(), role: 'admin' };
+
+  const makeOrder = (status = Status.Pending) =>
+    OrderModel.create({ user: userId, items: [item('c1', 2)], address: 'a', price: 4, coinsRedeemed: 0, paymentId: `pi_${status}`, status });
+
+  it('lets the owner and an admin read an order but hides it from other customers', async () => {
+    const order = await makeOrder();
+    const params = { id: order._id.toString() };
+
+    expect((await run(controller.oneById, { user: owner, params })).res.send).toHaveBeenCalled();
+    expect((await run(controller.oneById, { user: admin, params })).res.send).toHaveBeenCalled();
+
+    const other = await run(controller.oneById, { user: otherUser, params });
+    expect(other.res.send).not.toHaveBeenCalled();
+    expect(other.next).toHaveBeenCalledWith(expect.objectContaining({ status: 404 }));
+  });
+
+  it("does not let another customer cancel someone else's order", async () => {
+    const order = await makeOrder();
+    const { next } = await run(controller.cancel, { user: otherUser, params: { id: order._id.toString() } });
+
+    expect(next).toHaveBeenCalledWith(expect.objectContaining({ status: 404 }));
+    expect((await OrderModel.findById(order._id))?.status).toBe(Status.Pending);
+    expect(await OutboxModel.countDocuments()).toBe(0);
+  });
+
+  it('refuses to cancel an order that is already delivered', async () => {
+    const order = await makeOrder(Status.Delivered);
+    const { next } = await run(controller.cancel, { user: owner, params: { id: order._id.toString() } });
+
+    expect(next).toHaveBeenCalledWith(expect.objectContaining({ status: 400 }));
+    expect((await OrderModel.findById(order._id))?.status).toBe(Status.Delivered);
     expect(await OutboxModel.countDocuments()).toBe(0);
   });
 });
