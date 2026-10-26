@@ -48,7 +48,7 @@ const CandyCard: React.FC<CandyCardProps> = ({ candy }) => {
             {(candy.vendor as any).name}
           </Text>
           <LinkOverlay as={NextLink} href={`/candy/${candy._id}`}>
-            <Text mt={0} as="h3" fontWeight="medium" fontSize="xl">
+            <Text mt={0} as="h3" fontWeight="medium" fontSize="xl" textTransform="capitalize">
               {candy.name}
             </Text>
           </LinkOverlay>
@@ -69,6 +69,7 @@ const CandyCard: React.FC<CandyCardProps> = ({ candy }) => {
                 {cartCandy ? (
                   <>
                     <Button
+                      isDisabled={cartCandy.itemsInCart >= candy.quantity}
                       onClick={() => {
                         dispatch(addCandyToCart({ candy }));
                       }}
@@ -87,11 +88,12 @@ const CandyCard: React.FC<CandyCardProps> = ({ candy }) => {
                 ) : (
                   <Button
                     w="full"
+                    isDisabled={candy.quantity < 1}
                     onClick={() => {
                       dispatch(addCandyToCart({ candy }));
                     }}
                   >
-                    Add to Cart
+                    {candy.quantity < 1 ? "Out of stock" : "Add to Cart"}
                   </Button>
                 )}
               </HStack>

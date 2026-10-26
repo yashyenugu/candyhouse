@@ -11,7 +11,7 @@ const UserProvider: React.FC<React.PropsWithChildren> = ({ children }) => {
   React.useEffect(() => {
     (async () => {
       if (!isLoading && (!data || data.user.role !== Role.User)) {
-        await router.replace("/");
+        await router.replace(data ? "/" : "/login");
       }
     })();
   }, [router, data, isLoading]);

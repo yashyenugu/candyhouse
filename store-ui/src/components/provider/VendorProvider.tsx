@@ -11,7 +11,7 @@ const VendorProvider: React.FC<React.PropsWithChildren> = ({ children }) => {
   React.useEffect(() => {
     (async () => {
       if (!isLoading && (!data || data.user.role !== Role.Vendor)) {
-        await router.replace("/");
+        await router.replace(data ? "/" : "/login");
       }
     })()
     

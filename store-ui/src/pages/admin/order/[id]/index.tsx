@@ -48,7 +48,7 @@ const Order: NextPageWithLayout = () => {
                 <Text>Status: {order.status}</Text>
                 <Text>Address: {order.address}</Text>
                 <Text>Price: ${order.price}</Text>
-                <Text>Coins Redeemed: {order.coinsRedeemed}</Text>
+                <Text>Payment: {order.paymentId}</Text>
                 {order.status === Status.Pending && (
                   <Button
                     mt={3}
@@ -67,7 +67,7 @@ const Order: NextPageWithLayout = () => {
                 </Heading>
                 {order.items.map((item) => (
                   <Flex key={item._id} align="center" justify="space-between">
-                    <Text>{item.name}</Text>
+                    <Text textTransform="capitalize">{item.name}</Text>
                     <Text>Quantity: {item.itemsInCart}</Text>
                     <Box
                       position="relative"

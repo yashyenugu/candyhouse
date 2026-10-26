@@ -19,13 +19,17 @@ export const appSlice = createSlice({
   reducers: {
     addCandyToCart: (state, action) => {
       const cartArr = [...state.items];
+      const inStock: number = action.payload.candy.quantity ?? Infinity;
 
       if (cartArr.find((candy) => candy._id === action.payload.candy._id)) {
         const candyIndex = cartArr.findIndex(
           (candy) => candy._id === action.payload.candy._id
         );
+        // Never put more in the cart than the store has.
+        if (cartArr[candyIndex]!.itemsInCart >= inStock) return;
         cartArr[candyIndex]!.itemsInCart++;
       } else {
+        if (inStock < 1) return;
         // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
         cartArr.push({
           ...(action.payload.candy),

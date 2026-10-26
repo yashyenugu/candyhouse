@@ -14,6 +14,7 @@ export type Order = {
   address: string;
   price: number;
   coinsRedeemed: number;
+  paymentId: string;
   bank: string;
 };
 
