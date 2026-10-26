@@ -99,6 +99,8 @@ describe('confirmAndCreate', () => {
     expect(outbox[0].messages).toEqual([{ key: 'c1', value: JSON.stringify({ quantity: -2 }) }]);
     expect(outbox[0].status).toBe('sent');
     expect(mockSend).toHaveBeenCalledTimes(1);
+    const sent = mockSend.mock.calls[0][0] as { messages: { headers: { eventId: string } }[] };
+    expect(sent.messages[0].headers.eventId).toBe(`${String(outbox[0]._id)}:0`);
   });
 
   it('leaves the outbox row pending when Kafka fails, but keeps the order', async () => {
