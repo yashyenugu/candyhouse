@@ -52,7 +52,9 @@ Env files, by service (note they differ):
 
 `order-service` uses multi-document transactions, so `MONGO_URI` must point at a replica set (the dev compose runs a single-node `rs0`; use `?replicaSet=rs0`). A standalone Mongo fails with "Transaction numbers are only allowed on a replica set member".
 
-Known rough edges: the Kafka broker address is hardcoded to `candyhouse-kafka:9092` in each backend service's `lib/kafka.ts`, so native local runs need that mapped to localhost (or the string changed). `order-service` and the others connect to Kafka at boot in `server.ts`.
+In Kubernetes the same rule applies to the `mongo-uri` secret for `order-service` (see the comment in `helm-chart/values.yaml`; the chart does not deploy Mongo).
+
+Known rough edges: the Kafka broker comes from `KAFKA_URL` (falling back to `candyhouse-kafka:9092`, the Kubernetes name). `order-service` and the others connect to Kafka at boot in `server.ts`, so the broker and its topics must exist first.
 
 ## Testing
 

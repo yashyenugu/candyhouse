@@ -109,7 +109,12 @@ productService:
 
 # Secrets configuration
 secrets:
-  # Secret names in Kubernetes
+  # Secret names in Kubernetes. This chart does not deploy MongoDB: each service reads its connection
+  # string from the `mongo-uri` key of its secret, which you create outside the chart.
+  # IMPORTANT: order-service uses multi-document transactions (checkout, cancel), so its `mongo-uri`
+  # must point at a replica set (MongoDB Atlas always is; a self-hosted Mongo must run with
+  # --replSet / the Bitnami chart with architecture: replicaset). A standalone Mongo fails checkout
+  # with "Transaction numbers are only allowed on a replica set member or mongos".
   kafka:
     create: true
     name: kafka-secret
